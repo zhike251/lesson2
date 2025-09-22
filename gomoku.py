@@ -229,53 +229,43 @@ class GomokuGame:
     
     def score_pattern(self, pattern):
         """根据棋型模式评分"""
-        # 定义各种棋型的分数
+        # 定义各种棋型的分数（使用元组而不是列表）
         scores = {
             # 五连
-            [2, 2, 2, 2, 2]: 100000,
+            (2, 2, 2, 2, 2): 100000,
             # 活四
-            [0, 2, 2, 2, 2, 0]: 10000,
+            (0, 2, 2, 2, 2, 0): 10000,
             # 冲四
-            [0, 2, 2, 2, 2]: 5000,
-            [2, 2, 2, 2, 0]: 5000,
-            [2, 0, 2, 2, 2]: 3000,
-            [2, 2, 0, 2, 2]: 3000,
+            (0, 2, 2, 2, 2): 5000,
+            (2, 2, 2, 2, 0): 5000,
+            (2, 0, 2, 2, 2): 3000,
+            (2, 2, 0, 2, 2): 3000,
             # 活三
-            [0, 2, 2, 2, 0]: 1000,
-            [0, 2, 2, 0, 2, 0]: 800,
-            [0, 2, 0, 2, 2, 0]: 800,
+            (0, 2, 2, 2, 0): 1000,
+            (0, 2, 2, 0, 2, 0): 800,
+            (0, 2, 0, 2, 2, 0): 800,
             # 眠三
-            [0, 2, 2, 2]: 400,
-            [2, 2, 2, 0]: 400,
-            [2, 2, 0, 2]: 300,
-            [2, 0, 2, 2]: 300,
+            (0, 2, 2, 2): 400,
+            (2, 2, 2, 0): 400,
+            (2, 2, 0, 2): 300,
+            (2, 0, 2, 2): 300,
             # 活二
-            [0, 2, 2, 0]: 200,
-            [0, 2, 0, 2, 0]: 150,
+            (0, 2, 2, 0): 200,
+            (0, 2, 0, 2, 0): 150,
             # 眠二
-            [0, 2, 2]: 50,
-            [2, 2, 0]: 50,
-            [0, 2, 0, 2]: 30,
-            [2, 0, 2]: 30,
+            (0, 2, 2): 50,
+            (2, 2, 0): 50,
+            (0, 2, 0, 2): 30,
+            (2, 0, 2): 30,
         }
         
         max_score = 0
         # 检查所有可能的子模式
         for length in range(5, len(pattern) + 1):
             for i in range(len(pattern) - length + 1):
-                sub_pattern = pattern[i:i+length]
-                for key, score in scores.items():
-                    if len(key) == len(sub_pattern):
-                        match = True
-                        for k in range(len(key)):
-                            if key[k] == 2 and sub_pattern[k] != 2:
-                                match = False
-                                break
-                            elif key[k] == 0 and sub_pattern[k] not in [0, -1]:
-                                match = False
-                                break
-                        if match:
-                            max_score = max(max_score, score)
+                sub_pattern = tuple(pattern[i:i+length])
+                if sub_pattern in scores:
+                    max_score = max(max_score, scores[sub_pattern])
         
         return max_score
     
