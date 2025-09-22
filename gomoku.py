@@ -118,13 +118,195 @@ class GomokuGame:
         return empty_positions
         
     def ai_move(self):
-        """简单的AI逻辑：随机选择一个空位置"""
-        empty_positions = self.get_empty_positions()
-        if empty_positions:
-            row, col = random.choice(empty_positions)
+        """智能AI逻辑：使用评分策略"""
+        # 首先检查是否有必胜位置
+        winning_move = self.find_winning_move(2)
+        if winning_move:
+            row, col = winning_move
+            self.make_move(row, col)
+            return row, col
+        
+        # 检查是否需要阻止对手获胜
+        blocking_move = self.find_winning_move(1)
+        if blocking_move:
+            row, col = blocking_move
+            self.make_move(row, col)
+            return row, col
+        
+        # 使用评分策略选择最佳位置
+        best_score = float('-inf')
+        best_move = None
+        
+        # 获取候选位置（只考虑周围有棋子的位置）
+        candidates = self.get_best_move()
+        
+        for i, j in candidates:
+            if self.board[i][j] == 0:
+                # 模拟落子
+                self.board[i][j] = 2
+                score = self.evaluate_position(i, j, 2)
+                self.board[i][j] = 0  # 恢复
+                
+                # 检查这个位置对玩家的重要性
+                self.board[i][j] = 1
+                opponent_score = self.evaluate_position(i, j, 1)
+                self.board[i][j] = 0  # 恢复
+                
+                # 综合评分：进攻 + 防守
+                total_score = score + opponent_score * 1.1  # 防守权重稍高
+                
+                # 添加位置权重（中心位置更有价值）
+                center_bonus = (7 - abs(i - 7)) + (7 - abs(j - 7))
+                total_score += center_bonus * 5
+                
+                if total_score > best_score:
+                    best_score = total_score
+                    best_move = (i, j)
+        
+        if best_move:
+            row, col = best_move
             self.make_move(row, col)
             return row, col
         return None, None
+    
+    def find_winning_move(self, player):
+        """寻找必胜或必防的位置"""
+        for i in range(BOARD_SIZE):
+            for j in range(BOARD_SIZE):
+                if self.board[i][j] == 0:
+                    # 模拟落子
+                    self.board[i][j] = player
+                    if self.check_winner(i, j):
+                        self.board[i][j] = 0  # 恢复
+                        return (i, j)
+                    self.board[i][j] = 0  # 恢复
+        return None
+    
+    def evaluate_position(self, row, col, player):
+        """评估某个位置的分数"""
+        score = 0
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]  # 水平、垂直、对角线
+        
+        for dx, dy in directions:
+            line_score = self.evaluate_line(row, col, dx, dy, player)
+            score += line_score
+            
+        return score
+    
+    def evaluate_line(self, row, col, dx, dy, player):
+        """评估某个方向上的分数"""
+        # 获取这个方向上的完整模式
+        pattern = self.get_pattern(row, col, dx, dy, player)
+        return self.score_pattern(pattern)
+    
+    def get_pattern(self, row, col, dx, dy, player):
+        """获取某个方向上的棋型模式"""
+        pattern = []
+        
+        # 向正方向延伸5格
+        x, y = row, col
+        for _ in range(5):
+            if 0 <= x < BOARD_SIZE and 0 <= y < BOARD_SIZE:
+                pattern.append(self.board[x][y])
+            else:
+                pattern.append(-1)  # 边界
+            x += dx
+            y += dy
+        
+        # 向负方向延伸4格（不包括当前位置）
+        x, y = row - dx, col - dy
+        negative_pattern = []
+        for _ in range(4):
+            if 0 <= x < BOARD_SIZE and 0 <= y < BOARD_SIZE:
+                negative_pattern.append(self.board[x][y])
+            else:
+                negative_pattern.append(-1)  # 边界
+            x -= dx
+            y -= dy
+        
+        # 合并模式：负方向 + 正方向
+        return negative_pattern[::-1] + pattern
+    
+    def score_pattern(self, pattern):
+        """根据棋型模式评分"""
+        # 定义各种棋型的分数
+        scores = {
+            # 五连
+            [2, 2, 2, 2, 2]: 100000,
+            # 活四
+            [0, 2, 2, 2, 2, 0]: 10000,
+            # 冲四
+            [0, 2, 2, 2, 2]: 5000,
+            [2, 2, 2, 2, 0]: 5000,
+            [2, 0, 2, 2, 2]: 3000,
+            [2, 2, 0, 2, 2]: 3000,
+            # 活三
+            [0, 2, 2, 2, 0]: 1000,
+            [0, 2, 2, 0, 2, 0]: 800,
+            [0, 2, 0, 2, 2, 0]: 800,
+            # 眠三
+            [0, 2, 2, 2]: 400,
+            [2, 2, 2, 0]: 400,
+            [2, 2, 0, 2]: 300,
+            [2, 0, 2, 2]: 300,
+            # 活二
+            [0, 2, 2, 0]: 200,
+            [0, 2, 0, 2, 0]: 150,
+            # 眠二
+            [0, 2, 2]: 50,
+            [2, 2, 0]: 50,
+            [0, 2, 0, 2]: 30,
+            [2, 0, 2]: 30,
+        }
+        
+        max_score = 0
+        # 检查所有可能的子模式
+        for length in range(5, len(pattern) + 1):
+            for i in range(len(pattern) - length + 1):
+                sub_pattern = pattern[i:i+length]
+                for key, score in scores.items():
+                    if len(key) == len(sub_pattern):
+                        match = True
+                        for k in range(len(key)):
+                            if key[k] == 2 and sub_pattern[k] != 2:
+                                match = False
+                                break
+                            elif key[k] == 0 and sub_pattern[k] not in [0, -1]:
+                                match = False
+                                break
+                        if match:
+                            max_score = max(max_score, score)
+        
+        return max_score
+    
+    def get_best_move(self):
+        """获取最佳落子位置（考虑周围有棋子的位置）"""
+        candidates = []
+        
+        # 只考虑周围有棋子的空位
+        for i in range(BOARD_SIZE):
+            for j in range(BOARD_SIZE):
+                if self.board[i][j] == 0 and self.has_neighbor(i, j):
+                    candidates.append((i, j))
+        
+        # 如果没有邻居，选择中心位置
+        if not candidates:
+            center = BOARD_SIZE // 2
+            return [(center, center)]
+        
+        return candidates
+    
+    def has_neighbor(self, row, col):
+        """检查某个位置周围是否有棋子"""
+        for i in range(-2, 3):
+            for j in range(-2, 3):
+                if i == 0 and j == 0:
+                    continue
+                ni, nj = row + i, col + j
+                if 0 <= ni < BOARD_SIZE and 0 <= nj < BOARD_SIZE:
+                    if self.board[ni][nj] != 0:
+                        return True
+        return False
 
 def draw_board(screen):
     """绘制棋盘"""
