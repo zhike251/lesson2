@@ -133,6 +133,27 @@ class GomokuGame:
             self.make_move(row, col)
             return row, col
         
+        # 检查是否需要阻止对手形成活四
+        threat_move = self.find_threat_move(1)
+        if threat_move:
+            row, col = threat_move
+            self.make_move(row, col)
+            return row, col
+        
+        # 检查是否需要阻止对手形成活三
+        urgent_move = self.find_urgent_move(1)
+        if urgent_move:
+            row, col = urgent_move
+            self.make_move(row, col)
+            return row, col
+        
+        # 检查自己是否能形成活四
+        attack_move = self.find_attack_move(2)
+        if attack_move:
+            row, col = attack_move
+            self.make_move(row, col)
+            return row, col
+        
         # 使用评分策略选择最佳位置
         best_score = float('-inf')
         best_move = None
@@ -153,7 +174,7 @@ class GomokuGame:
                 self.board[i][j] = 0  # 恢复
                 
                 # 综合评分：进攻 + 防守
-                total_score = score + opponent_score * 1.1  # 防守权重稍高
+                total_score = score + opponent_score * 1.5  # 提高防守权重
                 
                 # 添加位置权重（中心位置更有价值）
                 center_bonus = (7 - abs(i - 7)) + (7 - abs(j - 7))
@@ -181,6 +202,130 @@ class GomokuGame:
                         return (i, j)
                     self.board[i][j] = 0  # 恢复
         return None
+    
+    def find_threat_move(self, player):
+        """寻找需要阻止的活四威胁"""
+        for i in range(BOARD_SIZE):
+            for j in range(BOARD_SIZE):
+                if self.board[i][j] == 0:
+                    # 模拟对手落子
+                    self.board[i][j] = player
+                    if self.has_open_four(i, j, player):
+                        self.board[i][j] = 0  # 恢复
+                        return (i, j)
+                    self.board[i][j] = 0  # 恢复
+        return None
+    
+    def find_urgent_move(self, player):
+        """寻找需要阻止的活三威胁"""
+        for i in range(BOARD_SIZE):
+            for j in range(BOARD_SIZE):
+                if self.board[i][j] == 0:
+                    # 模拟对手落子
+                    self.board[i][j] = player
+                    if self.has_open_three(i, j, player):
+                        self.board[i][j] = 0  # 恢复
+                        return (i, j)
+                    self.board[i][j] = 0  # 恢复
+        return None
+    
+    def find_attack_move(self, player):
+        """寻找进攻位置（形成活四）"""
+        for i in range(BOARD_SIZE):
+            for j in range(BOARD_SIZE):
+                if self.board[i][j] == 0:
+                    # 模拟自己落子
+                    self.board[i][j] = player
+                    if self.has_open_four(i, j, player):
+                        self.board[i][j] = 0  # 恢复
+                        return (i, j)
+                    self.board[i][j] = 0  # 恢复
+        return None
+    
+    def has_open_four(self, row, col, player):
+        """检查是否有活四"""
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        for dx, dy in directions:
+            if self.check_open_four_in_direction(row, col, dx, dy, player):
+                return True
+        return False
+    
+    def has_open_three(self, row, col, player):
+        """检查是否有活三"""
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        for dx, dy in directions:
+            if self.check_open_three_in_direction(row, col, dx, dy, player):
+                return True
+        return False
+    
+    def check_open_four_in_direction(self, row, col, dx, dy, player):
+        """检查某个方向是否有活四"""
+        # 活四模式：[0,2,2,2,2,0] 或类似
+        pattern = self.get_pattern_for_check(row, col, dx, dy, player)
+        
+        # 检查是否包含活四模式
+        for i in range(len(pattern) - 5):
+            sub_pattern = pattern[i:i+6]
+            if self.is_open_four_pattern(sub_pattern, player):
+                return True
+        return False
+    
+    def check_open_three_in_direction(self, row, col, dx, dy, player):
+        """检查某个方向是否有活三"""
+        # 活三模式：[0,2,2,2,0] 或类似
+        pattern = self.get_pattern_for_check(row, col, dx, dy, player)
+        
+        # 检查是否包含活三模式
+        for i in range(len(pattern) - 4):
+            sub_pattern = pattern[i:i+5]
+            if self.is_open_three_pattern(sub_pattern, player):
+                return True
+        return False
+    
+    def get_pattern_for_check(self, row, col, dx, dy, player):
+        """获取用于检查的模式"""
+        pattern = []
+        # 向两个方向各延伸4格
+        for direction in [-1, 1]:
+            x, y = row, col
+            for _ in range(4):
+                x += dx * direction
+                y += dy * direction
+                if 0 <= x < BOARD_SIZE and 0 <= y < BOARD_SIZE:
+                    pattern.append(self.board[x][y])
+                else:
+                    pattern.append(-1)  # 边界
+            x, y = row, col
+        
+        # 插入当前位置
+        pattern.insert(4, player)
+        return pattern
+    
+    def is_open_four_pattern(self, pattern, player):
+        """检查是否是活四模式"""
+        # 简化的活四检测
+        count = 0
+        open_ends = 0
+        for val in pattern:
+            if val == player:
+                count += 1
+            elif val == 0:
+                open_ends += 1
+        
+        return count == 4 and open_ends >= 2
+    
+    def is_open_three_pattern(self, pattern, player):
+        """检查是否是活三模式"""
+        # 简化的活三检测
+        count = 0
+        open_ends = 0
+        for val in pattern:
+            if val == player:
+                count += 1
+            elif val == 0:
+                open_ends += 1
+        
+        return count == 3 and open_ends >= 2
     
     def evaluate_position(self, row, col, player):
         """评估某个位置的分数"""
