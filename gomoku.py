@@ -1,6 +1,7 @@
 import pygame
 import sys
 import random
+from integrated_ai import EnhancedGomokuGame, draw_ai_info, draw_ai_thinking, draw_last_ai_move
 
 # 初始化pygame
 pygame.init()
@@ -47,12 +48,19 @@ except:
             small_font = pygame.font.Font(None, 24)
 
 class GomokuGame:
-    def __init__(self):
+    def __init__(self, ai_difficulty="medium"):
         self.board = [[0 for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
         self.current_player = 1  # 1为人类玩家（黑棋），2为电脑玩家（白棋）
         self.game_over = False
         self.winner = 0
         self.human_turn = True
+        
+        # 集成现代化AI系统
+        from integrated_ai import IntegratedGomokuAI
+        self.ai_system = IntegratedGomokuAI(ai_difficulty=ai_difficulty)
+        
+        # AI思考时间
+        self.ai_thinking_time = 0
         
     def reset_game(self):
         """重置游戏"""
@@ -61,6 +69,10 @@ class GomokuGame:
         self.game_over = False
         self.winner = 0
         self.human_turn = True
+        
+        # 重置AI系统
+        self.ai_system = IntegratedGomokuAI(ai_difficulty=self.ai_system.ai_difficulty)
+        self.ai_thinking_time = 0
         
     def is_valid_move(self, row, col):
         """检查落子是否有效"""
@@ -118,7 +130,26 @@ class GomokuGame:
         return empty_positions
         
     def ai_move(self):
-        """智能AI逻辑：使用评分策略"""
+        """现代化AI逻辑：使用集成AI系统"""
+        import time
+        start_time = time.time()
+        
+        # 使用现代化AI系统获取最佳移动
+        ai_player = 2  # 白棋
+        move = self.ai_system.get_ai_move(self.board, ai_player)
+        
+        self.ai_thinking_time = time.time() - start_time
+        
+        if move:
+            row, col = move
+            if self.make_move(row, col):
+                return row, col
+        
+        # 如果AI系统失败，使用备用策略
+        return self._fallback_ai_move()
+    
+    def _fallback_ai_move(self):
+        """备用AI策略"""
         # 首先检查是否有必胜位置
         winning_move = self.find_winning_move(2)
         if winning_move:
@@ -133,61 +164,27 @@ class GomokuGame:
             self.make_move(row, col)
             return row, col
         
-        # 检查是否需要阻止对手形成活四
-        threat_move = self.find_threat_move(1)
-        if threat_move:
-            row, col = threat_move
-            self.make_move(row, col)
-            return row, col
-        
-        # 检查是否需要阻止对手形成活三
-        urgent_move = self.find_urgent_move(1)
-        if urgent_move:
-            row, col = urgent_move
-            self.make_move(row, col)
-            return row, col
-        
-        # 检查自己是否能形成活四
-        attack_move = self.find_attack_move(2)
-        if attack_move:
-            row, col = attack_move
-            self.make_move(row, col)
-            return row, col
-        
-        # 使用评分策略选择最佳位置
+        # 使用简单的评分策略
         best_score = float('-inf')
         best_move = None
         
-        # 获取候选位置（只考虑周围有棋子的位置）
         candidates = self.get_best_move()
         
         for i, j in candidates:
             if self.board[i][j] == 0:
-                # 模拟落子
                 self.board[i][j] = 2
                 score = self.evaluate_position(i, j, 2)
-                self.board[i][j] = 0  # 恢复
+                self.board[i][j] = 0
                 
-                # 检查这个位置对玩家的重要性
-                self.board[i][j] = 1
-                opponent_score = self.evaluate_position(i, j, 1)
-                self.board[i][j] = 0  # 恢复
-                
-                # 综合评分：进攻 + 防守
-                total_score = score + opponent_score * 1.5  # 提高防守权重
-                
-                # 添加位置权重（中心位置更有价值）
-                center_bonus = (7 - abs(i - 7)) + (7 - abs(j - 7))
-                total_score += center_bonus * 5
-                
-                if total_score > best_score:
-                    best_score = total_score
+                if score > best_score:
+                    best_score = score
                     best_move = (i, j)
         
         if best_move:
             row, col = best_move
             self.make_move(row, col)
             return row, col
+        
         return None, None
     
     def find_winning_move(self, player):
@@ -442,6 +439,22 @@ class GomokuGame:
                     if self.board[ni][nj] != 0:
                         return True
         return False
+    
+    def get_ai_info(self):
+        """获取AI信息"""
+        return self.ai_system.get_ai_info()
+    
+    def get_performance_stats(self):
+        """获取性能统计"""
+        ai_stats = self.ai_system.get_performance_summary()
+        
+        return {
+            'ai_stats': ai_stats,
+            'game_stats': {
+                'total_moves': len(self.ai_system.move_history),
+                'total_time': self.ai_system.performance_stats['total_time']
+            }
+        }
 
 def draw_board(screen):
     """绘制棋盘"""
@@ -502,9 +515,18 @@ def draw_status(screen, game):
             color = RED
         text_surface = font.render(text, True, color)
         screen.blit(text_surface, (WINDOW_WIDTH // 2 - text_surface.get_width() // 2, status_y))
+        
+        # 显示AI思考时间
+        if not game.human_turn and game.ai_thinking_time > 0:
+            time_text = small_font.render(f"思考时间: {game.ai_thinking_time:.2f}秒", True, RED)
+            screen.blit(time_text, (WINDOW_WIDTH // 2 - time_text.get_width() // 2, status_y + 30))
+    
+    # 绘制AI信息
+    draw_ai_info(screen, game, font, small_font)
     
     # 绘制重新开始按钮
-    button_rect = pygame.Rect(WINDOW_WIDTH // 2 - 80, status_y + 40, 160, 40)
+    button_y = status_y + 60 if game.game_over else status_y + 50
+    button_rect = pygame.Rect(WINDOW_WIDTH // 2 - 80, button_y, 160, 40)
     pygame.draw.rect(screen, BLACK, button_rect, 2)
     button_text = small_font.render("重新开始", True, BLACK)
     screen.blit(button_text, (button_rect.x + 40, button_rect.y + 10))
