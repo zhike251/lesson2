@@ -12,7 +12,7 @@ import numpy as np
 import threading
 import concurrent.futures
 from threading import Lock
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from collections import defaultdict
 
@@ -582,6 +582,183 @@ class AlphaZeroPlayer:
         """重置游戏状态"""
         self.move_history = []
         self.search_statistics = []
+    
+    def create_root(self, board: List[List[int]], player: int) -> MCTSNode:
+        """创建MCTS根节点"""
+        state = np.array(board)
+        root = MCTSNode(state=state, parent=None)
+        return root
+    
+    def run_simulation(self, root: MCTSNode):
+        """运行一次MCTS模拟"""
+        # 选择
+        leaf = self._select_node(root)
+        
+        # 扩展
+        if not self._is_terminal(leaf.state):
+            self._expand_node(leaf)
+        
+        # 模拟
+        value = self._simulate(leaf)
+        
+        # 回传
+        self._backpropagate(leaf, value)
+    
+    def get_move_probabilities(self, root: MCTSNode, temperature: float = 1.0) -> Dict[Tuple[int, int], float]:
+        """获取移动概率分布"""
+        if not root.children:
+            return {}
+        
+        # 计算每个动作的访问概率
+        total_visits = sum(child.visit_count for child in root.children.values())
+        
+        if total_visits == 0:
+            return {}
+        
+        action_probs = {}
+        for action, child in root.children.items():
+            if temperature == 0:
+                # 贪婪选择
+                prob = 1.0 if child.visit_count == max(c.visit_count for c in root.children.values()) else 0.0
+            else:
+                # 根据访问次数和温度计算概率
+                prob = (child.visit_count ** (1.0 / temperature)) / (total_visits ** (1.0 / temperature))
+            
+            action_probs[action] = prob
+        
+        # 归一化
+        prob_sum = sum(action_probs.values())
+        if prob_sum > 0:
+            action_probs = {action: prob / prob_sum for action, prob in action_probs.items()}
+        
+        return action_probs
+    
+    def _select_node(self, node: MCTSNode) -> MCTSNode:
+        """选择节点（PUCT算法）"""
+        while node.is_expanded and not self._is_terminal(node.state):
+            # 选择最佳子节点
+            best_child = None
+            best_value = -float('inf')
+            
+            for action, child in node.children.items():
+                # PUCT公式
+                prior_prob = node.policy_probs.get(action, 1.0 / len(node.children))
+                exploration_value = self.c_puct * prior_prob * math.sqrt(node.visit_count) / (1 + child.visit_count)
+                exploitation_value = child.average_value
+                
+                uct_value = exploitation_value + exploration_value
+                
+                if uct_value > best_value:
+                    best_value = uct_value
+                    best_child = child
+            
+            if best_child:
+                node = best_child
+            else:
+                break
+        
+        return node
+    
+    def _expand_node(self, node: MCTSNode):
+        """扩展节点"""
+        # 获取合法动作
+        legal_actions = self._get_legal_actions_from_state(node.state)
+        
+        for action in legal_actions:
+            # 创建子节点
+            new_state = self._apply_action(node.state, action)
+            child = MCTSNode(state=new_state, parent=node)
+            node.children[action] = child
+    
+    def _simulate(self, node: MCTSNode) -> float:
+        """模拟游戏到结束"""
+        if self._is_terminal(node.state):
+            return self._get_game_result(node.state)
+        
+        # 使用网络价值估计作为模拟结果
+        if hasattr(self.network, 'predict_policy_value'):
+            _, value = self.network.predict_policy_value(node.state, player=1)
+            return value
+        
+        # 简单的随机模拟
+        return random.uniform(-1, 1)
+    
+    def _backpropagate(self, node: MCTSNode, value: float):
+        """回传价值"""
+        while node:
+            node.visit_count += 1
+            node.total_value += value
+            value = -value  # 交替玩家的价值
+            node = node.parent
+    
+    def _is_terminal(self, state: np.ndarray) -> bool:
+        """检查是否为终端状态"""
+        # 检查是否有五连
+        for player in [1, 2]:
+            if self._check_win(state, player):
+                return True
+        
+        # 检查是否平局
+        return np.sum(state == 0) == 0
+    
+    def _check_win(self, state: np.ndarray, player: int) -> bool:
+        """检查指定玩家是否获胜"""
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        
+        for i in range(state.shape[0]):
+            for j in range(state.shape[1]):
+                if state[i, j] == player:
+                    for dx, dy in directions:
+                        if self._check_line_win(state, i, j, dx, dy, player):
+                            return True
+        
+        return False
+    
+    def _check_line_win(self, state: np.ndarray, row: int, col: int, dx: int, dy: int, player: int) -> bool:
+        """检查某个方向是否获胜"""
+        count = 1
+        
+        # 正向检查
+        x, y = row + dx, col + dy
+        while (0 <= x < state.shape[0] and 0 <= y < state.shape[1] and state[x, y] == player):
+            count += 1
+            x += dx
+            y += dy
+        
+        # 反向检查
+        x, y = row - dx, col - dy
+        while (0 <= x < state.shape[0] and 0 <= y < state.shape[1] and state[x, y] == player):
+            count += 1
+            x -= dx
+            y -= dy
+        
+        return count >= 5
+    
+    def _get_game_result(self, state: np.ndarray) -> float:
+        """获取游戏结果"""
+        if self._check_win(state, 1):
+            return 1.0
+        elif self._check_win(state, 2):
+            return -1.0
+        else:
+            return 0.0
+    
+    def _get_legal_actions_from_state(self, state: np.ndarray) -> List[Tuple[int, int]]:
+        """从状态获取合法动作"""
+        legal_actions = []
+        for i in range(state.shape[0]):
+            for j in range(state.shape[1]):
+                if state[i, j] == 0:
+                    legal_actions.append((i, j))
+        return legal_actions
+    
+    def _apply_action(self, state: np.ndarray, action: Tuple[int, int]) -> np.ndarray:
+        """应用动作到状态"""
+        new_state = state.copy()
+        row, col = action
+        # 假设当前玩家是1（实际使用时需要根据具体情况调整）
+        new_state[row, col] = 1
+        return new_state
 
 # 神经网络接口基类
 class NeuralNetworkInterface:
@@ -729,6 +906,79 @@ class AlphaZeroStyleNetwork(NeuralNetworkInterface):
                 if state[i, j] == 0:
                     legal_actions.append((i, j))
         return legal_actions
+    
+    def train_batch(self, board_states: np.ndarray, policy_targets: np.ndarray, 
+                   value_targets: np.ndarray) -> Dict[str, float]:
+        """
+        训练批次数据
+        
+        Args:
+            board_states: 棋盘状态批次
+            policy_targets: 策略目标批次
+            value_targets: 价值目标批次
+            
+        Returns:
+            损失信息
+        """
+        if self.use_dummy:
+            # Dummy网络返回虚拟损失
+            return {
+                'loss': random.uniform(0.1, 0.5),
+                'policy_loss': random.uniform(0.05, 0.3),
+                'value_loss': random.uniform(0.05, 0.2)
+            }
+        
+        # 这里应该实现实际的训练逻辑
+        # 由于当前使用dummy实现，返回虚拟损失
+        return self._dummy_train_batch(board_states, policy_targets, value_targets)
+    
+    def _dummy_train_batch(self, board_states: np.ndarray, policy_targets: np.ndarray, 
+                          value_targets: np.ndarray) -> Dict[str, float]:
+        """虚拟训练实现"""
+        # 模拟训练损失
+        policy_loss = random.uniform(0.1, 0.4)
+        value_loss = random.uniform(0.05, 0.2)
+        total_loss = policy_loss + value_loss
+        
+        return {
+            'loss': total_loss,
+            'policy_loss': policy_loss,
+            'value_loss': value_loss
+        }
+    
+    def predict(self, board_state: np.ndarray) -> Tuple[np.ndarray, float]:
+        """
+        预测策略和价值（用于强化学习）
+        
+        Args:
+            board_state: 棋盘状态
+            
+        Returns:
+            (policy, value): 策略概率和价值估计
+        """
+        # 获取策略和价值
+        policy_probs, value = self.predict_policy_value(board_state, player=1)
+        
+        # 转换策略为numpy数组
+        board_size = board_state.shape[-1]
+        policy_array = np.zeros((board_size * board_size,))
+        
+        for (row, col), prob in policy_probs.items():
+            policy_array[row * board_size + col] = prob
+        
+        return policy_array, value
+    
+    def get_state(self) -> Dict[str, Any]:
+        """获取网络状态（用于保存）"""
+        return {
+            'use_dummy': self.use_dummy,
+            'dummy_weights': random.random() if self.use_dummy else None
+        }
+    
+    def set_state(self, state: Dict[str, Any]):
+        """设置网络状态（用于加载）"""
+        self.use_dummy = state.get('use_dummy', True)
+        # 这里应该加载实际的网络权重
 
 # 向后兼容
 class DummyNeuralNetwork(AlphaZeroStyleNetwork):

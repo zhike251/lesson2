@@ -139,21 +139,25 @@ class IntegratedGomokuAI:
             self.evaluator = self.traditional_evaluator
         
         # 初始化AI引擎
-        if self.engine_type == "neural_mcts" or self.ai_difficulty == "neural_mcts":
+        if self.ai_difficulty == "reinforced":
+            # 使用强化学习AI引擎
+            try:
+                from reinforced_ai import create_reinforced_ai_from_best_model
+                reinforced_ai = create_reinforced_ai_from_best_model()
+                if reinforced_ai:
+                    self.ai_engine = reinforced_ai.ai_engine
+                    self.neural_evaluator = reinforced_ai.neural_evaluator
+                    print("✓ 成功加载强化学习模型")
+                else:
+                    # 回退到Neural MCTS
+                    print("⚠ 未找到训练模型，回退到Neural MCTS")
+                    self._create_neural_mcts_engine()
+            except ImportError:
+                print("⚠ 强化学习模块不可用，回退到Neural MCTS")
+                self._create_neural_mcts_engine()
+        elif self.engine_type == "neural_mcts" or self.ai_difficulty == "neural_mcts":
             # 使用Neural MCTS引擎
-            if self.neural_evaluator:
-                network_adapter = NeuralEvaluatorNetworkAdapter(self.neural_evaluator)
-            else:
-                # 使用默认的dummy网络
-                from neural_mcts import AlphaZeroStyleNetwork
-                network_adapter = AlphaZeroStyleNetwork()
-                
-            self.ai_engine = NeuralMCTSAdapter(
-                neural_network=network_adapter,
-                mcts_simulations=self.mcts_simulations,
-                c_puct=self.c_puct,
-                time_limit=self.time_limit
-            )
+            self._create_neural_mcts_engine()
         else:
             # 使用传统Minimax引擎
             self.ai_engine = ModernGomokuAI(
@@ -251,6 +255,14 @@ class IntegratedGomokuAI:
                 "strategy": SearchStrategy.BALANCED,
                 "mcts_simulations": 1000,
                 "c_puct": 1.25
+            },
+            "reinforced": {
+                "max_depth": 0,  # 强化学习不使用深度限制
+                "time_limit": 6.0,
+                "strategy": SearchStrategy.BALANCED,
+                "mcts_simulations": 1200,
+                "c_puct": 1.5,
+                "use_reinforced_model": True
             }
         }
         
@@ -846,6 +858,22 @@ class EnhancedGomokuGame:
             'ai_stats': ai_stats,
             'game_stats': monitor_stats
         }
+    
+    def _create_neural_mcts_engine(self):
+        """创建Neural MCTS引擎"""
+        if self.neural_evaluator:
+            network_adapter = NeuralEvaluatorNetworkAdapter(self.neural_evaluator)
+        else:
+            # 使用默认的dummy网络
+            from neural_mcts import AlphaZeroStyleNetwork
+            network_adapter = AlphaZeroStyleNetwork()
+            
+        self.ai_engine = NeuralMCTSAdapter(
+            neural_network=network_adapter,
+            mcts_simulations=self.mcts_simulations,
+            c_puct=self.c_puct,
+            time_limit=self.time_limit
+        )
 
 class PerformanceMonitor:
     """性能监控器"""
