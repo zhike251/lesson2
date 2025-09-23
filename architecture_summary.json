@@ -1,0 +1,29 @@
+{
+  "total_parameters": 11599888,
+  "model_size_mb": 44.25006103515625,
+  "config": {
+    "board_size": 15,
+    "input_channels": 12,
+    "residual_blocks": 8,
+    "filters": 256,
+    "policy_head_filters": 32,
+    "value_head_filters": 16,
+    "dropout_rate": 0.3,
+    "activation": "swish",
+    "use_attention": true,
+    "use_multiscale": true,
+    "pattern_channels": 32
+  },
+  "architecture_summary": {
+    "input_shape": [
+      1,
+      12,
+      15,
+      15
+    ],
+    "backbone_blocks": 8,
+    "pattern_detection": true,
+    "attention_mechanism": true,
+    "multi_scale_features": true
+  }
+}

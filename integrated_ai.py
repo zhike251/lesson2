@@ -8,43 +8,162 @@ AI集成模块
 
 import time
 import pygame
+import numpy as np
 from typing import List, Tuple, Optional, Dict
 from modern_ai import ModernGomokuAI, SearchResult
 from advanced_evaluator import ComprehensiveEvaluator, ThreatAssessmentSystem
 from search_optimizer import SearchOptimizer, SearchStrategy
+from neural_evaluator import NeuralNetworkEvaluator, NeuralEvaluatorAdapter, NeuralConfig
+from neural_mcts import NeuralMCTSAdapter, NeuralEvaluatorNetworkAdapter, AlphaZeroStyleNetwork
 
-# 导入游戏常量
 BOARD_SIZE = 15
 EMPTY = 0
 BLACK = 1
 WHITE = 2
 
+class HybridEvaluator:
+    """混合评估器，结合传统评估和神经网络评估"""
+    
+    def __init__(self, traditional_evaluator, neural_adapter, neural_weight: float = 0.4):
+        """
+        初始化混合评估器
+        
+        Args:
+            traditional_evaluator: 传统评估器
+            neural_adapter: 神经网络适配器
+            neural_weight: 神经网络评估的权重
+        """
+        self.traditional_evaluator = traditional_evaluator
+        self.neural_adapter = neural_adapter
+        self.neural_weight = neural_weight
+        self.traditional_weight = 1.0 - neural_weight
+        
+        # 统计信息
+        self.evaluation_count = 0
+        self.neural_success_count = 0
+        
+    def evaluate_board(self, board: List[List[int]], player: int) -> int:
+        """评估棋盘状态（兼容modern_ai接口）"""
+        return self.comprehensive_evaluate(board, player)
+    
+    def comprehensive_evaluate(self, board: List[List[int]], player: int) -> int:
+        """综合评估棋盘状态"""
+        self.evaluation_count += 1
+        
+        # 传统评估
+        traditional_score = self.traditional_evaluator.comprehensive_evaluate(board, player)
+        
+        # 神经网络评估
+        try:
+            neural_score = self.neural_adapter.evaluate_board(board, player)
+            self.neural_success_count += 1
+            
+            # 加权组合
+            combined_score = (self.traditional_weight * traditional_score + 
+                            self.neural_weight * neural_score)
+            
+            return int(combined_score)
+            
+        except Exception as e:
+            # 如果神经网络评估失败，回退到传统评估
+            print(f"神经网络评估失败，使用传统评估: {e}")
+            return traditional_score
+    
+    def evaluate_move(self, board: List[List[int]], row: int, col: int, player: int) -> int:
+        """评估移动"""
+        if board[row][col] != EMPTY:
+            return -float('inf')
+        
+        # 模拟落子
+        board[row][col] = player
+        score = self.comprehensive_evaluate(board, player)
+        board[row][col] = EMPTY
+        
+        return score
+    
+    def get_neural_success_rate(self) -> float:
+        """获取神经网络成功率"""
+        if self.evaluation_count == 0:
+            return 0.0
+        return self.neural_success_count / self.evaluation_count
+
 class IntegratedGomokuAI:
     """集成化的五子棋AI系统"""
     
-    def __init__(self, ai_difficulty: str = "medium", time_limit: float = 3.0):
+    def __init__(self, ai_difficulty: str = "medium", time_limit: float = 3.0, 
+                 use_neural: bool = True, engine_type: str = "minimax",
+                 training_mode: bool = False, data_collector = None):
         """
         初始化集成AI系统
         
         Args:
-            ai_difficulty: AI难度级别 ("easy", "medium", "hard", "expert")
+            ai_difficulty: AI难度级别 ("easy", "medium", "hard", "expert", "neural", "neural_mcts")
             time_limit: 时间限制（秒）
+            use_neural: 是否使用神经网络评估
+            engine_type: AI引擎类型 ("minimax", "neural_mcts")
+            training_mode: 是否为训练模式
+            data_collector: 训练数据收集器
         """
         self.ai_difficulty = ai_difficulty
         self.time_limit = time_limit
+        self.use_neural = use_neural
+        self.engine_type = engine_type
+        self.training_mode = training_mode
+        self.data_collector = data_collector
+        
+        # 训练模式相关
+        self.current_game_id = None
+        self.move_start_time = None
+        
+        # 自动设置引擎类型
+        if ai_difficulty == "neural_mcts":
+            self.engine_type = "neural_mcts"
+            self.use_neural = True
         
         # 根据难度设置参数
         self._setup_ai_parameters()
         
-        # 初始化AI组件
-        self.ai_engine = ModernGomokuAI(
-            max_depth=self.max_depth,
-            time_limit=self.time_limit
-        )
-        
-        self.evaluator = ComprehensiveEvaluator()
+        # 初始化传统评估器
+        self.traditional_evaluator = ComprehensiveEvaluator()
         self.threat_assessment = ThreatAssessmentSystem()
         self.search_optimizer = SearchOptimizer(time_limit=self.time_limit)
+        
+        # 初始化神经网络评估器
+        if self.use_neural or ai_difficulty == "neural":
+            self.neural_evaluator = self._create_neural_evaluator()
+            self.neural_adapter = NeuralEvaluatorAdapter(self.neural_evaluator, weight=0.4)
+            self.evaluator = HybridEvaluator(self.traditional_evaluator, self.neural_adapter)
+        else:
+            self.neural_evaluator = None
+            self.neural_adapter = None
+            self.evaluator = self.traditional_evaluator
+        
+        # 初始化AI引擎
+        if self.engine_type == "neural_mcts" or self.ai_difficulty == "neural_mcts":
+            # 使用Neural MCTS引擎
+            if self.neural_evaluator:
+                network_adapter = NeuralEvaluatorNetworkAdapter(self.neural_evaluator)
+            else:
+                # 使用默认的dummy网络
+                from neural_mcts import AlphaZeroStyleNetwork
+                network_adapter = AlphaZeroStyleNetwork()
+                
+            self.ai_engine = NeuralMCTSAdapter(
+                neural_network=network_adapter,
+                mcts_simulations=self.mcts_simulations,
+                c_puct=self.c_puct,
+                time_limit=self.time_limit
+            )
+        else:
+            # 使用传统Minimax引擎
+            self.ai_engine = ModernGomokuAI(
+                max_depth=self.max_depth,
+                time_limit=self.time_limit
+            )
+            
+            # 替换AI引擎的评估器
+            if hasattr(self.ai_engine, 'evaluator'):
+                self.ai_engine.evaluator = self.evaluator
         
         # 性能监控
         self.performance_stats = {
@@ -60,6 +179,44 @@ class IntegratedGomokuAI:
         self.game_stage = "opening"
         self.move_history = []
         
+    def _create_neural_evaluator(self) -> NeuralNetworkEvaluator:
+        """创建神经网络评估器"""
+        # 根据难度配置神经网络
+        if self.ai_difficulty == "neural":
+            config = NeuralConfig(
+                board_size=15,
+                input_features=40,
+                hidden_layers=[128, 64, 32],
+                use_pattern_features=True,
+                use_position_features=True,
+                use_threat_features=True,
+                use_historical_features=True
+            )
+        elif self.ai_difficulty == "expert":
+            config = NeuralConfig(
+                board_size=15,
+                input_features=32,
+                hidden_layers=[64, 32],
+                use_pattern_features=True,
+                use_position_features=True,
+                use_threat_features=True
+            )
+        else:
+            config = NeuralConfig(
+                board_size=15,
+                input_features=24,
+                hidden_layers=[32, 16],
+                use_pattern_features=True,
+                use_position_features=True
+            )
+        
+        neural_evaluator = NeuralNetworkEvaluator(config)
+        
+        # 如果有预训练权重，可以在这里加载
+        # neural_evaluator.load_weights("pretrained_weights.json")
+        
+        return neural_evaluator
+
     def _setup_ai_parameters(self):
         """根据难度设置AI参数"""
         difficulty_settings = {
@@ -82,6 +239,18 @@ class IntegratedGomokuAI:
                 "max_depth": 5,
                 "time_limit": 5.0,
                 "strategy": SearchStrategy.BALANCED
+            },
+            "neural": {
+                "max_depth": 4,
+                "time_limit": 4.0,
+                "strategy": SearchStrategy.BALANCED
+            },
+            "neural_mcts": {
+                "max_depth": 0,  # MCTS不使用深度限制
+                "time_limit": 5.0,
+                "strategy": SearchStrategy.BALANCED,
+                "mcts_simulations": 1000,
+                "c_puct": 1.25
             }
         }
         
@@ -89,6 +258,63 @@ class IntegratedGomokuAI:
         self.max_depth = settings["max_depth"]
         self.time_limit = settings["time_limit"]
         self.strategy = settings["strategy"]
+        self.mcts_simulations = settings.get("mcts_simulations", 800)
+        self.c_puct = settings.get("c_puct", 1.0)
+    
+    def start_training_game(self, black_player: str = "Neural_MCTS", 
+                           white_player: str = "Neural_MCTS", 
+                           metadata: Optional[Dict] = None) -> str:
+        """
+        开始训练游戏
+        
+        Args:
+            black_player: 黑棋玩家标识
+            white_player: 白棋玩家标识
+            metadata: 元数据
+            
+        Returns:
+            游戏ID
+        """
+        if self.training_mode and self.data_collector:
+            self.current_game_id = self.data_collector.start_game(
+                black_player=black_player,
+                white_player=white_player,
+                metadata=metadata
+            )
+            return self.current_game_id
+        return None
+    
+    def end_training_game(self, result: Dict, total_time: float = 0) -> bool:
+        """
+        结束训练游戏
+        
+        Args:
+            result: 游戏结果
+            total_time: 总时间
+            
+        Returns:
+            是否成功结束
+        """
+        if self.training_mode and self.data_collector and self.current_game_id:
+            success = self.data_collector.end_game(result, total_time)
+            self.current_game_id = None
+            return success
+        return False
+    
+    def set_training_mode(self, enabled: bool, data_collector = None):
+        """
+        设置训练模式
+        
+        Args:
+            enabled: 是否启用训练模式
+            data_collector: 数据收集器
+        """
+        self.training_mode = enabled
+        if enabled and data_collector:
+            self.data_collector = data_collector
+        elif not enabled:
+            self.data_collector = None
+            self.current_game_id = None
     
     def get_ai_move(self, board: List[List[int]], player: int) -> Tuple[int, int]:
         """
@@ -102,6 +328,7 @@ class IntegratedGomokuAI:
             (row, col): 移动位置
         """
         start_time = time.time()
+        self.move_start_time = start_time
         
         # 更新游戏阶段
         self._update_game_stage(board)
@@ -131,6 +358,10 @@ class IntegratedGomokuAI:
                 'time': result.time_elapsed,
                 'nodes': result.nodes_searched
             })
+            
+            # 训练模式下收集数据
+            if self.training_mode and self.data_collector and self.current_game_id:
+                self._collect_training_data(board, player, result, start_time)
         
         return result.move
     
@@ -261,6 +492,140 @@ class IntegratedGomokuAI:
                 'time': result.time_elapsed
             })
     
+    def _collect_training_data(self, board: List[List[int]], player: int, 
+                              result: SearchResult, start_time: float):
+        """
+        收集训练数据
+        
+        Args:
+            board: 棋盘状态
+            player: 当前玩家
+            result: AI搜索结果
+            start_time: 开始时间
+        """
+        try:
+            # 转换棋盘为numpy数组
+            board_array = np.array(board)
+            
+            # 获取MCTS概率分布
+            mcts_probabilities = {}
+            visit_counts = {}
+            
+            # 从AI引擎获取搜索信息
+            if hasattr(self.ai_engine, 'get_search_info'):
+                search_info = self.ai_engine.get_search_info()
+                mcts_probabilities = search_info.get('move_probabilities', {})
+                visit_counts = search_info.get('visit_counts', {})
+            elif hasattr(result, 'move_probabilities'):
+                mcts_probabilities = getattr(result, 'move_probabilities', {})
+                visit_counts = getattr(result, 'visit_counts', {})
+            elif hasattr(self.ai_engine, 'mcts') and hasattr(self.ai_engine.mcts, 'get_action_probabilities'):
+                # 专门为Neural MCTS适配
+                try:
+                    action_probs = self.ai_engine.mcts.get_action_probabilities(board_array, player)
+                    if action_probs:
+                        mcts_probabilities = action_probs
+                        # 从访问次数计算
+                        if hasattr(self.ai_engine.mcts, 'root') and self.ai_engine.mcts.root:
+                            for move, child in self.ai_engine.mcts.root.children.items():
+                                visit_counts[move] = child.visit_count
+                except Exception as e:
+                    print(f"获取MCTS信息失败: {e}")
+            
+            # 如果没有概率分布，创建简单的分布
+            if not mcts_probabilities and result.move:
+                mcts_probabilities = {result.move: 1.0}
+                visit_counts = {result.move: 1}
+            
+            # 改进价值估计
+            value_estimate = getattr(result, 'value_estimate', result.score / 10000.0)
+            
+            # 为传统引擎添加价值估计转换
+            if self.engine_type != "neural_mcts":
+                # 将分数转换为[-1, 1]范围的价值估计
+                if abs(result.score) > 100000:  # 必胜局面
+                    value_estimate = 1.0 if result.score > 0 else -1.0
+                else:
+                    # 使用sigmoid函数归一化
+                    value_estimate = np.tanh(result.score / 10000.0)
+                
+                # 从当前玩家角度调整价值
+                if player == WHITE:
+                    value_estimate = -value_estimate
+            
+            # 记录移动数据
+            thinking_time = time.time() - start_time
+            
+            success = self.data_collector.record_move(
+                position=result.move,
+                player=player,
+                board_state=board_array,
+                mcts_probabilities=mcts_probabilities,
+                value_estimate=value_estimate,
+                visit_counts=visit_counts,
+                search_depth=getattr(result, 'depth', self.max_depth),
+                thinking_time=thinking_time
+            )
+            
+            if not success:
+                print("警告：训练数据收集失败")
+                
+            # 添加数据质量检查
+            self._validate_training_data(board_array, mcts_probabilities, value_estimate)
+                
+        except Exception as e:
+            print(f"训练数据收集错误: {e}")
+    
+    def _validate_training_data(self, board_state: np.ndarray, 
+                               probabilities: Dict, value_estimate: float):
+        """
+        验证训练数据质量
+        
+        Args:
+            board_state: 棋盘状态
+            probabilities: 概率分布
+            value_estimate: 价值估计
+        """
+        # 检查棋盘状态
+        if board_state.shape != (BOARD_SIZE, BOARD_SIZE):
+            print(f"警告：棋盘尺寸错误 {board_state.shape}")
+            return False
+        
+        # 检查概率分布
+        if probabilities:
+            total_prob = sum(probabilities.values())
+            if abs(total_prob - 1.0) > 0.1:
+                print(f"警告：概率分布和不为1 ({total_prob:.3f})")
+            
+            # 检查概率值范围
+            for pos, prob in probabilities.items():
+                if not (0 <= prob <= 1):
+                    print(f"警告：概率值超出范围 {pos}: {prob}")
+                    return False
+                
+                # 检查位置有效性
+                row, col = pos
+                if not (0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE):
+                    print(f"警告：位置超出棋盘范围 {pos}")
+                    return False
+                
+                # 检查位置是否为空
+                if board_state[row, col] != EMPTY:
+                    print(f"警告：位置不为空 {pos}")
+                    return False
+        
+        # 检查价值估计
+        if not (-1.5 <= value_estimate <= 1.5):
+            print(f"警告：价值估计超出合理范围 {value_estimate}")
+        
+        return True
+    
+    def get_training_statistics(self) -> Dict:
+        """获取训练统计信息"""
+        if self.training_mode and self.data_collector:
+            return self.data_collector.get_statistics()
+        return {}
+    
     def get_performance_summary(self) -> Dict:
         """获取性能摘要"""
         return {
@@ -274,13 +639,34 @@ class IntegratedGomokuAI:
     
     def get_ai_info(self) -> Dict:
         """获取AI信息"""
-        return {
-            'difficulty': self.ai_difficulty,
-            'max_depth': self.max_depth,
-            'time_limit': self.time_limit,
-            'strategy': self.strategy.name,
-            'engine_type': 'ModernGomokuAI',
-            'features': [
+        if self.engine_type == "neural_mcts" or self.ai_difficulty == "neural_mcts":
+            # Neural MCTS引擎特性
+            base_features = [
+                'Neural Monte Carlo Tree Search (MCTS)',
+                'PUCT Algorithm with Dynamic c_puct',
+                'Neural Network Policy & Value Guidance',
+                'Search Tree Reuse',
+                'Parallel Search Support',
+                'Dirichlet Noise for Exploration',
+                'Virtual Loss for Thread Safety',
+                'AlphaZero-style Architecture'
+            ]
+            
+            neural_info = {
+                'neural_enabled': True,
+                'engine_type': 'Neural MCTS',
+                'mcts_simulations': self.mcts_simulations,
+                'c_puct': self.c_puct
+            }
+            
+            if hasattr(self.ai_engine, 'get_statistics'):
+                mcts_stats = self.ai_engine.get_statistics()
+                neural_info.update({
+                    'mcts_statistics': mcts_stats
+                })
+        else:
+            # 传统Minimax引擎特性
+            base_features = [
                 'Minimax with Alpha-Beta Pruning',
                 'Advanced Pattern Recognition',
                 'Threat Assessment System',
@@ -290,7 +676,35 @@ class IntegratedGomokuAI:
                 'Time Control',
                 'Iterative Deepening'
             ]
+            
+            neural_info = {}
+            if self.use_neural and self.neural_evaluator:
+                base_features.extend([
+                    'Neural Network Evaluation',
+                    'Hybrid Traditional+Neural Scoring',
+                    'Advanced Feature Extraction',
+                    'Pattern-Based Neural Features'
+                ])
+                
+                neural_info = {
+                    'neural_enabled': True,
+                    'neural_model_info': self.neural_evaluator.get_model_info(),
+                    'neural_success_rate': getattr(self.evaluator, 'get_neural_success_rate', lambda: 0.0)()
+                }
+            else:
+                neural_info = {'neural_enabled': False}
+        
+        info = {
+            'difficulty': self.ai_difficulty,
+            'max_depth': self.max_depth,
+            'time_limit': self.time_limit,
+            'strategy': self.strategy.name,
+            'engine_type': self.engine_type,
+            'features': base_features
         }
+        
+        info.update(neural_info)
+        return info
 
 class EnhancedGomokuGame:
     """增强版五子棋游戏类"""

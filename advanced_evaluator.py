@@ -614,6 +614,10 @@ class ComprehensiveEvaluator:
         self.threat_assessment = ThreatAssessmentSystem()
         self.strategic_evaluator = StrategicEvaluator()
         
+    def evaluate_board(self, board: List[List[int]], player: int) -> int:
+        """评估棋盘状态（兼容modern_ai接口）"""
+        return self.comprehensive_evaluate(board, player)
+    
     def comprehensive_evaluate(self, board: List[List[int]], player: int) -> int:
         """综合评估"""
         total_score = 0

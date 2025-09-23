@@ -1,0 +1,20 @@
+[
+  {
+    "name": "传统Minimax",
+    "move": [
+      8,
+      8
+    ],
+    "time": 0.0037484169006347656,
+    "success": true
+  },
+  {
+    "name": "Neural MCTS",
+    "move": [
+      8,
+      8
+    ],
+    "time": 0.002003908157348633,
+    "success": true
+  }
+]
