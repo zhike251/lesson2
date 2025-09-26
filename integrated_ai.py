@@ -10,6 +10,7 @@ import time
 import pygame
 import numpy as np
 from typing import List, Tuple, Optional, Dict
+from dataclasses import dataclass
 from modern_ai import ModernGomokuAI, SearchResult
 from advanced_evaluator import ComprehensiveEvaluator, ThreatAssessmentSystem
 from search_optimizer import SearchOptimizer, SearchStrategy
@@ -138,36 +139,9 @@ class IntegratedGomokuAI:
             self.neural_adapter = None
             self.evaluator = self.traditional_evaluator
         
-        # 初始化AI引擎
-        if self.ai_difficulty == "reinforced":
-            # 使用强化学习AI引擎
-            try:
-                from reinforced_ai import create_reinforced_ai_from_best_model
-                reinforced_ai = create_reinforced_ai_from_best_model()
-                if reinforced_ai:
-                    self.ai_engine = reinforced_ai.ai_engine
-                    self.neural_evaluator = reinforced_ai.neural_evaluator
-                    print("✓ 成功加载强化学习模型")
-                else:
-                    # 回退到Neural MCTS
-                    print("⚠ 未找到训练模型，回退到Neural MCTS")
-                    self._create_neural_mcts_engine()
-            except ImportError:
-                print("⚠ 强化学习模块不可用，回退到Neural MCTS")
-                self._create_neural_mcts_engine()
-        elif self.engine_type == "neural_mcts" or self.ai_difficulty == "neural_mcts":
-            # 使用Neural MCTS引擎
-            self._create_neural_mcts_engine()
-        else:
-            # 使用传统Minimax引擎
-            self.ai_engine = ModernGomokuAI(
-                max_depth=self.max_depth,
-                time_limit=self.time_limit
-            )
-            
-            # 替换AI引擎的评估器
-            if hasattr(self.ai_engine, 'evaluator'):
-                self.ai_engine.evaluator = self.evaluator
+        # 初始化AI引擎 - 延迟到方法末尾
+        self.ai_engine = None
+        self._pending_engine_setup = True
         
         # 性能监控
         self.performance_stats = {
@@ -182,6 +156,51 @@ class IntegratedGomokuAI:
         # 游戏状态
         self.game_stage = "opening"
         self.move_history = []
+        
+        # 延迟设置AI引擎
+        self._setup_ai_engine()
+        
+    def _setup_ai_engine(self):
+        """设置AI引擎"""
+        if self.ai_difficulty == "reinforced":
+            # 使用真正的强化学习AI引擎（修复版）
+            try:
+                from real_reinforced_ai_fixed import create_real_reinforced_ai
+                reinforced_ai = create_real_reinforced_ai()
+                if reinforced_ai and reinforced_ai.rl_network:
+                    self.ai_engine = reinforced_ai
+                    self.neural_evaluator = reinforced_ai
+                    print("[成功] 成功加载真正的强化学习模型")
+                else:
+                    # 回退到传统Minimax引擎
+                    print("[警告] 未找到训练模型，回退到传统AI引擎")
+                    self.ai_engine = ModernGomokuAI(
+                        max_depth=self.max_depth,
+                        time_limit=self.time_limit
+                    )
+                    if hasattr(self.ai_engine, 'evaluator'):
+                        self.ai_engine.evaluator = self.evaluator
+            except ImportError:
+                print("[警告] 强化学习模块不可用，回退到传统AI引擎")
+                self.ai_engine = ModernGomokuAI(
+                    max_depth=self.max_depth,
+                    time_limit=self.time_limit
+                )
+                if hasattr(self.ai_engine, 'evaluator'):
+                    self.ai_engine.evaluator = self.evaluator
+        elif self.engine_type == "neural_mcts" or self.ai_difficulty == "neural_mcts":
+            # 使用Neural MCTS引擎
+            self._create_neural_mcts_engine()
+        else:
+            # 使用传统Minimax引擎
+            self.ai_engine = ModernGomokuAI(
+                max_depth=self.max_depth,
+                time_limit=self.time_limit
+            )
+            
+            # 替换AI引擎的评估器
+            if hasattr(self.ai_engine, 'evaluator'):
+                self.ai_engine.evaluator = self.evaluator
         
     def _create_neural_evaluator(self) -> NeuralNetworkEvaluator:
         """创建神经网络评估器"""
@@ -328,6 +347,39 @@ class IntegratedGomokuAI:
             self.data_collector = None
             self.current_game_id = None
     
+    def get_best_move(self, board: List[List[int]], player: int) -> SearchResult:
+        """
+        获取AI的最佳移动（兼容接口）
+        
+        Args:
+            board: 棋盘状态
+            player: AI玩家编号
+            
+        Returns:
+            SearchResult: 搜索结果
+        """
+        # 直接使用现有的移动获取逻辑，但返回SearchResult对象
+        move = self.get_ai_move(board, player)
+        
+        if move:
+            return SearchResult(
+                score=0,  # 基础分数
+                move=move,
+                nodes_searched=1,
+                time_elapsed=0.001,
+                depth=1,
+                alpha_beta_cutoffs=0
+            )
+        else:
+            return SearchResult(
+                score=-999999,
+                move=None,
+                nodes_searched=0,
+                time_elapsed=0.001,
+                depth=0,
+                alpha_beta_cutoffs=0
+            )
+    
     def get_ai_move(self, board: List[List[int]], player: int) -> Tuple[int, int]:
         """
         获取AI的移动
@@ -354,6 +406,26 @@ class IntegratedGomokuAI:
         # 特殊情况处理
         special_move = self._check_special_moves(board, player)
         if special_move:
+            # 记录特殊情况下的性能统计
+            special_result = SearchResult(
+                score=999999,  # 必胜移动给最高分
+                move=special_move,
+                nodes_searched=0,
+                time_elapsed=0.001,
+                depth=1,
+                alpha_beta_cutoffs=0
+            )
+            self._update_performance_stats(special_result, start_time)
+            
+            # 记录移动历史
+            self.move_history.append({
+                'move': special_move,
+                'score': 999999,
+                'time': 0.001,
+                'nodes': 0
+            })
+            
+            # 返回简单的移动元组
             return special_move
         
         # 使用AI引擎获取最佳移动
@@ -379,7 +451,13 @@ class IntegratedGomokuAI:
     
     def _update_game_stage(self, board: List[List[int]]):
         """更新游戏阶段"""
-        filled_count = sum(row.count(EMPTY) for row in board)
+        # 处理numpy数组的情况
+        if hasattr(board, 'dtype') and hasattr(board, 'shape'):
+            # 是numpy数组
+            filled_count = np.sum(board == EMPTY)
+        else:
+            # 是普通列表
+            filled_count = sum(row.count(EMPTY) for row in board)
         empty_count = BOARD_SIZE * BOARD_SIZE - filled_count
         
         if empty_count > BOARD_SIZE * BOARD_SIZE * 0.8:
@@ -393,8 +471,14 @@ class IntegratedGomokuAI:
         """获取候选移动"""
         candidates = []
         
-        # 检查是否是空棋盘
-        empty_count = sum(row.count(EMPTY) for row in board)
+        # 检查是否是空棋盘 - 处理numpy数组的情况
+        if hasattr(board, 'dtype') and hasattr(board, 'shape'):
+            # 是numpy数组
+            empty_count = np.sum(board == EMPTY)
+        else:
+            # 是普通列表
+            empty_count = sum(row.count(EMPTY) for row in board)
+        
         if empty_count == BOARD_SIZE * BOARD_SIZE:
             # 开局策略
             return [(7, 7)]
@@ -641,11 +725,13 @@ class IntegratedGomokuAI:
     def get_performance_summary(self) -> Dict:
         """获取性能摘要"""
         return {
+            'ai_stats': {
+                'total_moves': self.performance_stats['total_moves'],
+                'avg_time_per_move': self.performance_stats['avg_time_per_move'],
+                'avg_nodes_per_move': self.performance_stats['avg_nodes_per_move']
+            },
             'difficulty': self.ai_difficulty,
             'game_stage': self.game_stage,
-            'total_moves': self.performance_stats['total_moves'],
-            'avg_time_per_move': self.performance_stats['avg_time_per_move'],
-            'avg_nodes_per_move': self.performance_stats['avg_nodes_per_move'],
             'move_history_count': len(self.move_history)
         }
     
@@ -717,6 +803,22 @@ class IntegratedGomokuAI:
         
         info.update(neural_info)
         return info
+    
+    def _create_neural_mcts_engine(self):
+        """创建Neural MCTS引擎"""
+        if self.neural_evaluator:
+            network_adapter = NeuralEvaluatorNetworkAdapter(self.neural_evaluator)
+        else:
+            # 使用默认的dummy网络
+            from neural_mcts import AlphaZeroStyleNetwork
+            network_adapter = AlphaZeroStyleNetwork()
+            
+        self.ai_engine = NeuralMCTSAdapter(
+            neural_network=network_adapter,
+            mcts_simulations=self.mcts_simulations,
+            c_puct=self.c_puct,
+            time_limit=self.time_limit
+        )
 
 class EnhancedGomokuGame:
     """增强版五子棋游戏类"""
@@ -858,22 +960,6 @@ class EnhancedGomokuGame:
             'ai_stats': ai_stats,
             'game_stats': monitor_stats
         }
-    
-    def _create_neural_mcts_engine(self):
-        """创建Neural MCTS引擎"""
-        if self.neural_evaluator:
-            network_adapter = NeuralEvaluatorNetworkAdapter(self.neural_evaluator)
-        else:
-            # 使用默认的dummy网络
-            from neural_mcts import AlphaZeroStyleNetwork
-            network_adapter = AlphaZeroStyleNetwork()
-            
-        self.ai_engine = NeuralMCTSAdapter(
-            neural_network=network_adapter,
-            mcts_simulations=self.mcts_simulations,
-            c_puct=self.c_puct,
-            time_limit=self.time_limit
-        )
 
 class PerformanceMonitor:
     """性能监控器"""

@@ -76,8 +76,9 @@ DIFFICULTY_OPTIONS = [
     {"name": "困难", "key": "hard", "description": "高手级别", "color": RED},
     {"name": "专家", "key": "expert", "description": "极限挑战", "color": DARK_GRAY},
     {"name": "神经网络", "key": "neural", "description": "AI增强", "color": (128, 0, 128)},
+    {"name": "强化学习", "key": "reinforced", "description": "自博弈训练", "color": (0, 128, 0)},
     {"name": "Neural MCTS", "key": "neural_mcts", "description": "顶级AI", "color": (255, 165, 0)},
-    {"name": "强化学习", "key": "reinforced", "description": "自博弈训练", "color": (0, 128, 0)}
+    {"name": "终极威胁AI", "key": "ultimate_threat", "description": "最强AI 100%防守", "color": (255, 0, 255)}
 ]
 
 class DifficultySelector:
@@ -160,8 +161,8 @@ class DifficultySelector:
         for button in self.buttons:
             if button['rect'].collidepoint(pos):
                 self.selected_difficulty = button['option']['key']
-                return True
-        return False
+                return self.selected_difficulty  # 返回选择的难度，而不是True
+        return None
     
     def handle_hover(self, pos):
         """处理鼠标悬停"""
@@ -176,16 +177,20 @@ class GomokuGame:
         self.winner = 0
         self.human_turn = True
         
-        # 集成现代化AI系统
-        from integrated_ai import IntegratedGomokuAI
-        self.ai_system = IntegratedGomokuAI(ai_difficulty=ai_difficulty)
-        
-        # AI思考时间
-        self.ai_thinking_time = 0
-        
         # 当前难度信息
         self.ai_difficulty = ai_difficulty
         self.difficulty_info = self._get_difficulty_info()
+        
+        # 根据难度选择不同的AI系统
+        if ai_difficulty == "ultimate_threat":
+            from ultimate_threat_ai import UltimateThreatAI
+            self.ai_system = UltimateThreatAI()
+        else:
+            from integrated_ai import IntegratedGomokuAI
+            self.ai_system = IntegratedGomokuAI(ai_difficulty=ai_difficulty)
+        
+        # AI思考时间
+        self.ai_thinking_time = 0
         
         # 游戏统计
         self.move_count = 0
@@ -211,7 +216,11 @@ class GomokuGame:
         # 重置AI思考时间
         self.ai_thinking_time = 0
         
-        print(f"AI难度已更改为: {self.difficulty_info['name']}")
+        # 调试信息：验证难度设置
+        print(f"[调试] 游戏难度: {self.ai_difficulty}")
+        print(f"[调试] AI系统难度: {self.ai_system.ai_difficulty}")
+        print(f"[调试] 显示名称: {self.difficulty_info['name']}")
+        print(f"[成功] AI难度已更改为: {self.difficulty_info['name']}")
         
     def reset_game(self):
         """重置游戏"""
@@ -221,9 +230,14 @@ class GomokuGame:
         self.winner = 0
         self.human_turn = True
         
-        # 重置AI系统
-        from integrated_ai import IntegratedGomokuAI
-        self.ai_system = IntegratedGomokuAI(ai_difficulty=self.ai_system.ai_difficulty)
+        # 重置AI系统 - 根据难度选择不同的AI
+        if self.ai_difficulty == "ultimate_threat":
+            from ultimate_threat_ai import UltimateThreatAI
+            self.ai_system = UltimateThreatAI()
+        else:
+            from integrated_ai import IntegratedGomokuAI
+            self.ai_system = IntegratedGomokuAI(ai_difficulty=self.ai_difficulty)
+        
         self.ai_thinking_time = 0
         
         # 重置游戏统计
@@ -292,13 +306,19 @@ class GomokuGame:
         return empty_positions
         
     def ai_move(self):
-        """现代化AI逻辑：使用集成AI系统"""
+        """现代化AI逻辑：根据AI类型使用不同的接口"""
         import time
         start_time = time.time()
         
-        # 使用现代化AI系统获取最佳移动
-        ai_player = 2  # 白棋
-        move = self.ai_system.get_ai_move(self.board, ai_player)
+        # 根据AI类型使用不同的接口
+        if self.ai_difficulty == "ultimate_threat":
+            # UltimateThreatAI使用 -1 作为白棋
+            ai_player = -1
+            move = self.ai_system.get_move(self.board, ai_player)
+        else:
+            # 其他AI使用 2 作为白棋
+            ai_player = 2
+            move = self.ai_system.get_ai_move(self.board, ai_player)
         
         self.ai_thinking_time = time.time() - start_time
         
@@ -604,17 +624,40 @@ class GomokuGame:
     
     def get_ai_info(self):
         """获取AI信息"""
-        return self.ai_system.get_ai_info()
+        # 检查AI系统是否有get_ai_info方法
+        if hasattr(self.ai_system, 'get_ai_info'):
+            return self.ai_system.get_ai_info()
+        else:
+            # 为UltimateThreatAI提供默认信息
+            return {
+                'name': 'UltimateThreatAI',
+                'difficulty': 'ultimate_threat',
+                'description': '最强AI 100%防守',
+                'thinking_time': getattr(self, 'ai_thinking_time', 0),
+                'threat_stats': getattr(self.ai_system, 'threat_stats', {
+                    'threats_detected': 0,
+                    'threats_defended': 0,
+                    'defense_rate': 0.0
+                })
+            }
     
     def get_performance_stats(self):
         """获取性能统计"""
         ai_stats = self.ai_system.get_performance_summary()
         
+        # 检查ai_stats是否已经包含嵌套的ai_stats字段
+        if isinstance(ai_stats, dict) and 'ai_stats' in ai_stats:
+            # 如果已经是嵌套结构，直接使用
+            final_ai_stats = ai_stats['ai_stats']
+        else:
+            # 如果是扁平结构，包装成嵌套结构
+            final_ai_stats = ai_stats
+        
         return {
-            'ai_stats': ai_stats,
+            'ai_stats': final_ai_stats,
             'game_stats': {
-                'total_moves': len(self.ai_system.move_history),
-                'total_time': self.ai_system.performance_stats['total_time']
+                'total_moves': len(getattr(self.ai_system, 'move_history', [])),
+                'total_time': getattr(self.ai_system, 'performance_stats', {}).get('total_time', 0.0)
             }
         }
 
@@ -737,6 +780,22 @@ def draw_status(screen, game):
     difficulty_text = tiny_font.render(f"AI难度: {game.difficulty_info['name']}", True, game.difficulty_info['color'])
     screen.blit(difficulty_text, (15, 15))
     
+    # 调试信息：每帧都显示当前状态
+    if hasattr(game, '_debug_counter'):
+        game._debug_counter += 1
+    else:
+        game._debug_counter = 0
+    
+    # 每60帧显示一次调试信息（约1秒）
+    if game._debug_counter % 60 == 0:
+        print(f"[UI调试] 显示难度: {game.difficulty_info['name']}")
+        print(f"[UI调试] 游戏难度: {game.ai_difficulty}")
+        # 安全地获取AI系统难度信息
+        if hasattr(game.ai_system, 'ai_difficulty'):
+            print(f"[UI调试] AI系统难度: {game.ai_system.ai_difficulty}")
+        else:
+            print(f"[UI调试] AI系统类型: {type(game.ai_system).__name__}")
+    
     # 绘制游戏统计信息
     if hasattr(game, 'move_count'):
         moves_text = tiny_font.render(f"步数: {game.move_count}", True, BLACK)
@@ -855,7 +914,7 @@ def main():
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # 左键点击
                     selected_difficulty = difficulty_selector.handle_click(event.pos)
-                    if selected_difficulty:
+                    if selected_difficulty is not None:  # 检查是否为None而不是检查真值
                         selecting_difficulty = False
             
             elif event.type == pygame.MOUSEMOTION:
@@ -909,7 +968,7 @@ def main():
                                 elif select_event.type == pygame.MOUSEBUTTONDOWN:
                                     if select_event.button == 1:
                                         new_difficulty = difficulty_selector.handle_click(select_event.pos)
-                                        if new_difficulty:
+                                        if new_difficulty is not None:  # 检查是否为None而不是检查真值
                                             selecting = False
                                             show_difficulty_selector = False
                                             game.change_difficulty(new_difficulty)

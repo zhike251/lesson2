@@ -9,7 +9,7 @@
 import time
 import random
 import math
-from typing import List, Tuple, Optional, Dict, Set
+from typing import List, Tuple, Optional, Dict, Set, Any
 from enum import Enum
 from dataclasses import dataclass
 from collections import defaultdict
@@ -464,6 +464,15 @@ class ModernGomokuAI:
         
         time_elapsed = time.time() - self.start_time
         
+        # 更新移动统计
+        if not hasattr(self, 'total_moves'):
+            self.total_moves = 0
+        if not hasattr(self, 'total_time'):
+            self.total_time = 0
+        
+        self.total_moves += 1
+        self.total_time += time_elapsed
+        
         return SearchResult(
             score=self.best_score,
             move=self.best_move,
@@ -613,6 +622,34 @@ class ModernGomokuAI:
             'cutoff_rate': self.alpha_beta_cutoffs / max(1, self.nodes_searched),
             'history_table_size': len(self.optimizer.history_table),
             'threat_cache_size': len(self.optimizer.threat_cache)
+        }
+    
+    def get_performance_summary(self) -> Dict[str, Any]:
+        """获取性能摘要 - 兼容integrated_ai和draw_ai_info的接口"""
+        # 计算平均节点数和时间
+        avg_nodes = self.nodes_searched / max(1, self.total_moves if hasattr(self, 'total_moves') else 1)
+        avg_time = 0.0
+        
+        if hasattr(self, 'total_time') and self.total_moves > 0:
+            avg_time = self.total_time / self.total_moves
+        
+        return {
+            # draw_ai_info期望的嵌套结构
+            'ai_stats': {
+                'total_moves': getattr(self, 'total_moves', 0),
+                'avg_time_per_move': avg_time,
+                'avg_nodes_per_move': avg_nodes
+            },
+            # 其他信息（保持向后兼容）
+            'difficulty': f'modern_depth_{self.max_depth}',
+            'game_stage': 'unknown',
+            'max_depth': self.max_depth,
+            'time_limit': self.time_limit,
+            'nodes_searched': self.nodes_searched,
+            'alpha_beta_cutoffs': self.alpha_beta_cutoffs,
+            'cutoff_rate': self.alpha_beta_cutoffs / max(1, self.nodes_searched),
+            'architecture': 'Modern Gomoku AI with Advanced Evaluator',
+            'search_algorithm': 'Iterative Deepening with Alpha-Beta Pruning'
         }
 
 # 测试函数

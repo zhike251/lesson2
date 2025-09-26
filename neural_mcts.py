@@ -1312,6 +1312,33 @@ class NeuralMCTSAdapter:
             'move_history_count': len(self.best_moves_history)
         }
     
+    def get_performance_summary(self) -> Dict[str, Any]:
+        """获取性能摘要 - 兼容integrated_ai和draw_ai_info的接口"""
+        # 计算平均时间和节点数
+        avg_time = self.total_time / max(1, self.total_moves)
+        avg_nodes = self.mcts_simulations  # MCTS中模拟次数相当于节点数
+        
+        return {
+            # draw_ai_info期望的嵌套结构
+            'ai_stats': {
+                'total_moves': self.total_moves,
+                'avg_time_per_move': avg_time,
+                'avg_nodes_per_move': avg_nodes
+            },
+            # 其他信息（保持向后兼容）
+            'difficulty': f'neural_mcts_sims_{self.mcts_simulations}',
+            'game_stage': 'unknown',
+            'mcts_simulations': self.mcts_simulations,
+            'c_puct': self.c_puct,
+            'time_limit': self.time_limit,
+            'adapter_type': 'Neural MCTS',
+            'neural_enabled': True,
+            'architecture': 'Neural Monte Carlo Tree Search',
+            'search_algorithm': 'PUCT with Neural Network Guidance',
+            'mcts_statistics': self.mcts_engine.get_statistics(),
+            'temperature': getattr(self.alphazero_player, 'temperature', 0.0)
+        }
+    
     def reset(self):
         """重置统计信息"""
         self.total_moves = 0
